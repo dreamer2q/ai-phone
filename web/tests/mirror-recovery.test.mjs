@@ -1,9 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { effectScope, nextTick, markRaw } from 'vue'
-import { useMseMirror } from '../src/lib/useMseMirror.js'
+// Backend CI also invokes the dependency-free Node checks before web/npm ci.
+// Keep that path usable; the real hook test runs when Vue is installed.
+let vue = null
+try { vue = await import('vue') } catch (error) {
+  if (error.code !== 'ERR_MODULE_NOT_FOUND' || !error.message.includes("package 'vue'")) throw error
+}
+const useMseMirror = vue ? (await import('../src/lib/useMseMirror.js')).useMseMirror : null
 
-test('a stalled SourceBuffer triggers one resync, bounded memory and requires a new init', async () => {
+test('a stalled SourceBuffer triggers one resync, bounded memory and requires a new init', {
+  skip: !vue && 'Run npm ci in web to exercise the Vue playback hook',
+}, async () => {
+  const { effectScope, nextTick, markRaw } = vue
   const originalSource = globalThis.MediaSource
   const originalWindow = globalThis.window
   const originalCreate = URL.createObjectURL
