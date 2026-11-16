@@ -12,7 +12,9 @@ import asyncio
 import copy
 import json
 import math
+import os
 import platform
+import re
 import socket
 import time
 import uuid
@@ -636,6 +638,15 @@ def _mask_token(url: str) -> str:
 
 
 def stable_agent_id(name: Optional[str] = None) -> str:
-    """优先用 hostname + 随机 4 字节，确保多 Agent 不撞号。同一进程稳定。"""
+    """Allow a unique local service identity; keep the per-process default.
+
+    A VM ledger is assigned to this ID. Managed services can retain it across
+    process restarts with AI_PHONE_AGENT_ID, unique to one node, not downlinked.
+    """
+    configured = os.environ.get("AI_PHONE_AGENT_ID", "").strip()
+    if configured:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", configured):
+            raise ValueError("AI_PHONE_AGENT_ID must be a unique 1-128 character service identifier")
+        return configured
     host = (name or socket.gethostname()).strip() or "agent"
     return f"{host}-{uuid.uuid4().hex[:8]}"

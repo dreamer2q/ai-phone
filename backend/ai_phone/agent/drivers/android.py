@@ -44,6 +44,23 @@ _ADB_KB_APK_PATH = (
 
 # 设备可能返回多余空行，提前编一个匹配 ``package:xxx`` 的表达式
 _PKG_PREFIX_RE = re.compile(r"^package:(.+)$")
+
+
+def _current_focus_package(window_dump: str) -> Optional[str]:
+    """Read current windows, preserving null/ANR focus instead of a stale task.
+
+    Android 15 omits these fields from `dumpsys window windows`; adbutils can
+    then pick the last historical `activity top` record as the foreground app.
+    None means this dump has no focus fields and the legacy reader may be tried.
+    """
+    lines = [line.strip() for line in window_dump.splitlines() if line.strip().startswith("mCurrentFocus=")]
+    for line in lines:
+        if "=Window{" not in line:
+            continue
+        match = re.search(r"\s([A-Za-z][A-Za-z0-9_.]*)/[^\s}]+", line)
+        # A focused system/ANR dialog is not the application behind it.
+        return match.group(1) if match else ""
+    return "" if lines else None
 _PRIMARY_LOCAL_DISPLAY_RE = re.compile(
     r'^\s*Display id 0: [^\r\n]*\breal (\d+) x (\d+)[^\r\n]*\buniqueId "local:(\d+)"',
     re.MULTILINE,
@@ -757,6 +774,13 @@ class AndroidDriver(BaseDriver):
         self._device.shell(f"am force-stop {package_name}")
 
     def current_app(self) -> str:
+        if self._is_emulator():
+            try:
+                focused = _current_focus_package(self._device.shell("dumpsys window") or "")
+                if focused is not None:
+                    return focused
+            except Exception:
+                pass
         try:
             app = self._device.app_current()
             return app.package or ""
