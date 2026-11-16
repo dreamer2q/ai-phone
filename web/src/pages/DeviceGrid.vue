@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import DeviceCard from '../components/DeviceCard.vue'
+import DeviceTable from '../components/DeviceTable.vue'
 import { api, internal } from '../lib/api.js'
 import { platformLabel } from '../lib/platform.js'
 
@@ -12,6 +12,7 @@ const agents = ref([])
 const loading = ref(false)
 const error = ref(null)
 const filter = ref('all')
+const search = ref('')
 let pollTimer = null
 
 async function refresh() {
@@ -63,7 +64,9 @@ function isReadyIdle(d) {
 }
 
 const filtered = computed(() => {
-  const list = enrichedDevices.value
+  const term = search.value.trim().toLocaleLowerCase()
+  const list = enrichedDevices.value.filter(d => !term || [d.alias, d.serial, d.model, d.brand, d.platform, d.agent_name_current, d.agent_id_current]
+    .some(value => String(value || '').toLocaleLowerCase().includes(term)))
   if (filter.value === 'online') return list.filter(isReadyIdle)
   if (filter.value === 'not_ready') return list.filter(isNotReady)
   if (filter.value === 'busy') return list.filter((d) => d.effective_status === 'busy')
@@ -251,9 +254,10 @@ function prettyErr(e) {
 <template>
   <section class="page">
     <header class="head">
-      <h2>设备总览</h2>
-      <RouterLink to="/device-library">设备库 · 按需启动 →</RouterLink>
+      <h2>设备 <span class="total-count">{{ counts.all }}</span></h2>
+      <RouterLink class="library-link" to="/device-library">设备库 ↗</RouterLink>
       <div class="toolbar">
+        <input v-model="search" type="search" class="device-search" placeholder="搜索设备、型号或节点" aria-label="搜索设备、型号或节点" />
         <div class="filters">
           <button
             v-for="f in ['all', 'online', 'not_ready', 'busy', 'offline']"
@@ -277,16 +281,8 @@ function prettyErr(e) {
     </p>
     <p v-if="error" class="err">加载失败：{{ error }}</p>
 
-    <div class="agent-panel">
-      <div class="agent-panel-head">
-        <div>
-          <div class="agent-title">Agent 在线状态</div>
-          <div class="agent-sub">
-            在线 {{ agentSummary.online }} 个 · 设备 {{ agentSummary.devicesTotal }} 台 · 运行中 {{ agentSummary.runningTotal }} 条
-          </div>
-        </div>
-        <div class="agent-tip">远端电脑启动 Agent 后会自动出现在这里</div>
-      </div>
+    <details class="agent-panel">
+      <summary><span class="agent-dot" />{{ agentSummary.online }} 个在线节点 <span class="agent-summary">{{ agentSummary.devicesTotal }} 台设备 · {{ agentSummary.runningTotal }} 个运行任务</span><span class="agent-expand">节点详情</span></summary>
       <div v-if="agents.length" class="agent-list">
         <div v-for="a in agents" :key="a.agent_id" class="agent-item">
           <span class="agent-dot"></span>
@@ -299,16 +295,9 @@ function prettyErr(e) {
         </div>
       </div>
       <div v-else class="agent-empty">暂无在线 Agent</div>
-    </div>
+    </details>
 
-    <div class="grid" v-if="filtered.length">
-      <DeviceCard
-        v-for="d in filtered"
-        :key="d.serial"
-        :device="d"
-        @edit-alias="openEdit"
-      />
-    </div>
+    <DeviceTable v-if="filtered.length" :devices="filtered" @edit-alias="openEdit" />
     <p v-else class="empty">
       暂无符合条件的设备。确认 Agent 已连上 Server（见后端日志 "Agent 上线"）。
     </p>
@@ -383,25 +372,39 @@ function prettyErr(e) {
 
 <style scoped>
 .page {
-  padding: 16px 24px 48px;
+  padding: 16px 18px 24px;
 }
 .head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   flex-wrap: wrap;
   gap: 12px;
 }
 h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 16px;
 }
 .toolbar {
   display: flex;
   gap: 8px;
   align-items: center;
+  margin-left: auto;
+  flex-wrap: wrap;
 }
+.total-count { font-size: 11px; color: #66758a; background: #e8edf3; border-radius: 4px; padding: 2px 6px; margin-left: 5px; font-weight: 500; }
+.library-link { color: #64748b; font-size: 11px; text-decoration: none; }
+.device-search { width: 205px; height: 30px; padding: 5px 9px; border: 1px solid #d7dfe8; background: #fff; border-radius: 4px; font: inherit; font-size: 12px; }
+.device-search:focus { outline: 2px solid #b7d5f8; outline-offset: 1px; }
+.agent-panel summary { display: flex; align-items: center; gap: 7px; cursor: pointer; list-style: none; font-size: 11px; color: #46576d; }
+.agent-panel summary::-webkit-details-marker { display: none; }
+.agent-summary { color: #8490a0; margin-left: 5px; }
+.agent-expand { margin-left: auto; color: #66758a; }
+.agent-expand::after { content: ' ▾'; }
+.agent-panel[open] .agent-expand::after { content: ' ▴'; }
+.agent-panel[open] .agent-list { margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5eaf0; }
+@media(max-width: 900px) { .toolbar { width: 100%; } .device-search { flex: 1; min-width: 160px; } .filters { overflow-x: auto; } }
 .filters {
   display: flex;
   gap: 4px;
@@ -410,8 +413,8 @@ h2 {
   border-radius: 8px;
 }
 .filters button {
-  padding: 6px 12px;
-  font-size: 13px;
+  padding: 5px 8px;
+  font-size: 11px;
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -429,12 +432,12 @@ h2 {
   font-size: 12px;
 }
 .refresh {
-  padding: 7px 14px;
+  padding: 5px 10px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   background: #fff;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 11px;
 }
 .refresh:hover {
   background: #f5f7fa;
@@ -480,11 +483,11 @@ h2 {
   background: #dbeafe;
 }
 .agent-panel {
-  margin-bottom: 16px;
-  padding: 12px 14px;
+  margin-bottom: 10px;
+  padding: 9px 11px;
   background: #fff;
   border: 1px solid #e2e6ec;
-  border-radius: 10px;
+  border-radius: 4px;
 }
 .agent-panel-head {
   display: flex;

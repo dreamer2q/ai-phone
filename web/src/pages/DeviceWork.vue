@@ -14,6 +14,7 @@ import { useMseMirror } from '../lib/useMseMirror.js'
 import { useJpegMirror } from '../lib/useJpegMirror.js'
 
 const route = useRoute()
+const infraDemo = import.meta.env.VITE_INFRA_DEMO === 'true'
 const router = useRouter()
 const serial = computed(() => String(route.params.serial || ''))
 
@@ -91,7 +92,7 @@ function normalizeErrorSummary(summary) {
 //              iOS dvt_screenshot 走这里
 // - 'jpeg' →  useJpegMirror（<img>，JPEG 每帧独立）。iOS mjpeg_passthrough（默认）
 //              走这里；设备旋转天然自适应，没有 init segment 概念
-const mirror = useMseMirror({ liveSyncSeconds: 0.4, debug: false })
+const mirror = useMseMirror({ liveSyncSeconds: 0.18, debug: false, onResync: () => sub?.resync() })
 const jpegMirror = useJpegMirror({ debug: false })
 const mirrorMode = ref(null) // null | 'mse' | 'jpeg'
 
@@ -148,7 +149,7 @@ const columnPercent = width => Math.round(width * 100 / Math.max(1, layoutWidth.
 let columnDrag = null
 let layoutObserver = null
 const RIGHT_SPLIT_KEY = 'ai-phone:device-work-right-split:v3'
-const RIGHT_PANEL_DEFAULT = { controls: 330 }
+const RIGHT_PANEL_DEFAULT = { controls: 280 }
 const RIGHT_PANEL_MIN = { controls: 44, logs: 42 }
 const RIGHT_SPLITTER_HEIGHT = 10
 const CONTROL_COLLAPSED_HEIGHT = 58
@@ -873,7 +874,7 @@ function onMessage(msg) {
       }
       // fmp4 init segment（ftyp + moov）—— 重建 SourceBuffer
       // eslint-disable-next-line no-console
-      console.log('[ws] video_init', { mime: msg.mime, w: msg.width, h: msg.height, b64len: msg.data?.length })
+      console.log('[ws] video_init', { mime: msg.mime, w: msg.width, h: msg.height, payloadLength: msg.data?.length })
       mirror.handleInit(msg)
       break
     case 'video_segment':
@@ -883,7 +884,7 @@ function onMessage(msg) {
       _segCount++
       if (_segCount === 1 || _segCount % 60 === 0) {
         // eslint-disable-next-line no-console
-        console.log('[ws] video_segment 累计', _segCount, '段，本段 base64 长度=', msg.data?.length)
+        console.log('[ws] video_segment 累计', _segCount, '段，本段载荷长度=', msg.data?.length)
       }
       mirror.handleSegment(msg)
       break
@@ -898,7 +899,7 @@ function onMessage(msg) {
       _segCount++
       if (_segCount === 1 || _segCount % 60 === 0) {
         // eslint-disable-next-line no-console
-        console.log('[ws] mirror_jpeg 累计', _segCount, '帧，尺寸=', msg.width, '×', msg.height, 'base64 长度=', msg.data?.length)
+        console.log('[ws] mirror_jpeg 累计', _segCount, '帧，尺寸=', msg.width, '×', msg.height, '载荷长度=', msg.data?.length)
       }
       jpegMirror.handleJpeg(msg)
       break
@@ -1235,6 +1236,12 @@ watch(
             <span class="mirror-size" v-if="displaySize.w">
               {{ displaySize.w }}×{{ displaySize.h }}
             </span>
+            <span v-if="mirrorMode === 'mse'" class="playback-stats"
+              title="实际播放帧率与播放器待播缓冲；不是点击到显示的端到端延迟">
+              {{ mirror.fps.value }} FPS · 缓冲 {{ mirror.bufferedMs.value }} ms
+              <span v-if="mirror.queueDepth.value"> · 队列 {{ mirror.queueDepth.value }}</span>
+              <span v-if="mirror.recoveries.value"> · 重同步 {{ mirror.recoveries.value }}</span>
+            </span>
             <span class="mirror-hint" v-if="!lock.readonly.value && currentRunId">
               VLM 运行中 · 手动 tap / 键盘 可插入
             </span>
@@ -1477,6 +1484,8 @@ watch(
             placeholder="例：打开设置，进入蓝牙页面"
             :disabled="!!currentRunId || lock.readonly.value"
           />
+          <details class="context-options" :open="functionMapContextTooLong || undefined">
+          <summary>执行参考 <span class="char-count">{{ functionMapContextLength ? `${functionMapContextLength} 字` : '可选' }}</span></summary>
           <label>
             功能地图上下文（执行参考，可选）
             <span class="char-count" :class="{ over: functionMapContextTooLong }">
@@ -1485,12 +1494,11 @@ watch(
           </label>
           <textarea
             v-model="functionMapContext"
-            rows="5"
+            rows="3"
             placeholder="可放本次执行会用到的功能入口、测试账号、验证码规则、异常处理等短精参考"
             :disabled="!!currentRunId || lock.readonly.value"
             :class="{ over: functionMapContextTooLong }"
           />
-          <div class="action-row">
             <div class="file-tools">
               <label
                 class="secondary small file-btn"
@@ -1524,9 +1532,11 @@ watch(
               </label>
               <span v-if="functionMapContextTooLong" class="limit-warn">已超出上限，请精简后再执行</span>
             </div>
+          </details>
+          <div class="action-row">
             <div class="btn-row">
-              <button class="primary" :disabled="busy || displayBusy || nativeDisplayBusy || waitingForNativeFrame || !!currentRunId || lock.readonly.value || functionMapContextTooLong" @click="startRun">
-                {{ currentRunId ? '运行中…' : '开始 Run' }}
+              <button class="primary" :disabled="infraDemo || busy || displayBusy || nativeDisplayBusy || waitingForNativeFrame || !!currentRunId || lock.readonly.value || functionMapContextTooLong" @click="startRun">
+                {{ infraDemo ? 'AI 暂未启用' : currentRunId ? '运行中…' : '开始 Run' }}
               </button>
               <button class="danger" :disabled="busy || !currentRunId" @click="stopRun">停止</button>
               <button class="ghost" @click="clearLogs">清空日志</button>
@@ -1581,7 +1591,7 @@ watch(
 .work {
   height: 100%;
   min-height: 0;
-  padding: 12px 20px 14px;
+  padding: 8px 12px 10px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1658,8 +1668,8 @@ watch(
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 8px;
   flex-wrap: wrap;
 }
 .back {
@@ -1672,7 +1682,7 @@ watch(
 }
 h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 13px;
   display: flex;
   gap: 10px;
   align-items: baseline;
@@ -1691,7 +1701,7 @@ h2 {
   gap: 8px;
   align-items: center;
   color: #4b5563;
-  font-size: 13px;
+  font-size: 11px;
 }
 .dot {
   width: 8px;
@@ -1832,7 +1842,7 @@ h2 {
   font-size: 12px;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
 }
-@media (max-width: 1080px) {
+@media (max-width: 760px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
@@ -1849,7 +1859,7 @@ h2 {
 .mirror-wrap {
   display: flex;
   flex-direction: column;
-  border-radius: 10px;
+  border-radius: 4px;
   border: 1px solid #2a2f38;
   overflow: hidden;
   background: #0d1117;
@@ -1861,21 +1871,23 @@ h2 {
 .mirror-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
+  gap: 8px;
+  padding: 5px 8px;
   background: #161b22;
   border-bottom: 1px solid #2a2f38;
   flex-wrap: wrap;
   flex-shrink: 0;
   color: #d7dbe3;
-  font-size: 12px;
+  font-size: 11px;
 }
+.playback-stats { color: #9aaec6; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mirror-hint { font-size: 10px; }
 .android-screen-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 4px 8px;
   background: #161b22;
   color: #d7dbe3;
   font-size: 12px;
@@ -2023,7 +2035,7 @@ h2 {
   align-items: center;
   justify-content: space-around;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 5px 8px;
   background: #161b22;
   border-top: 1px solid #2a2f38;
 }
@@ -2081,11 +2093,11 @@ h2 {
   height: 100%;
   background: #fff;
   border: 1px solid #e2e6ec;
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-radius: 4px;
+  padding: 9px 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   overflow: auto;
 }
 .goal-panel label {
@@ -2094,12 +2106,17 @@ h2 {
 }
 .goal-panel textarea {
   resize: vertical;
-  font-size: 14px;
-  padding: 8px 10px;
+  font-size: 12px;
+  padding: 6px 8px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   font-family: inherit;
 }
+.context-options { flex-shrink: 0; border-top: 1px solid #edf0f4; padding-top: 6px; }
+.context-options summary { cursor: pointer; color: #627086; font-size: 11px; padding: 3px 0; }
+.context-options[open] label { display: block; margin: 6px 0; font-size: 11px; }
+.context-options textarea { width: 100%; }
+.context-options .file-tools { margin-top: 6px; }
 .goal-panel textarea.over {
   border-color: #dc2626;
   background: #fef2f2;
@@ -2165,7 +2182,7 @@ h2 {
   min-width: 0;
 }
 .engine-row label {
-  font-size: 13px;
+  font-size: 11px;
   color: #374151;
   white-space: nowrap;
 }
@@ -2173,7 +2190,7 @@ h2 {
 .engine-row input {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 6px 8px;
+  padding: 5px 7px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   font-size: 13px;
@@ -2205,7 +2222,7 @@ h2 {
   margin-left: auto;
 }
 .btn-row button {
-  padding: 8px 16px;
+  padding: 6px 11px;
   border-radius: 6px;
   border: 1px solid transparent;
   cursor: pointer;

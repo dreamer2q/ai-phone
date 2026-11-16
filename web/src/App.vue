@@ -4,6 +4,7 @@ import { RouterLink, RouterView } from 'vue-router'
 import { api } from './lib/api.js'
 
 const version = ref(null)
+const infraDemo = import.meta.env.VITE_INFRA_DEMO === 'true'
 const healthErr = ref(null)
 let healthTimer = null
 
@@ -36,9 +37,9 @@ onBeforeUnmount(() => {
     <header class="top">
       <RouterLink to="/" class="brand">
         <span class="logo">◎</span>
-        <span class="name">ai-phone</span>
+        <span class="name">ai-phone</span><span class="edition">COMPACT</span>
       </RouterLink>
-      <nav>
+      <nav aria-label="主导航">
         <RouterLink to="/" class="tab" active-class="on" exact>设备总览</RouterLink>
         <RouterLink to="/queue" class="tab" active-class="on">队列</RouterLink>
         <RouterLink to="/app-distribution" class="tab" active-class="on">应用分发</RouterLink>
@@ -47,6 +48,7 @@ onBeforeUnmount(() => {
         <RouterLink to="/analytics" class="tab" active-class="on">大盘</RouterLink>
       </nav>
       <div class="meta">
+        <span v-if="infraDemo">设备管理测试 · AI 未启用</span>
         <span v-if="version">v{{ version }}</span>
         <span v-else-if="healthErr" class="bad">后端不可达</span>
       </div>
@@ -64,12 +66,15 @@ onBeforeUnmount(() => {
 html, body, #app {
   margin: 0;
   padding: 0;
-  background: #f7f8fa;
+  background: #f4f6f9;
   color: #1f2937;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'PingFang SC', 'Microsoft YaHei', sans-serif;
   height: 100%;
+  font-size: 13px;
 }
+button, input, textarea, select { font-family: inherit; }
+button:focus-visible, a:focus-visible { outline: 2px solid #85b7f2; outline-offset: 2px; }
 * {
   box-sizing: border-box;
 }
@@ -89,8 +94,10 @@ a {
 .top {
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 10px 20px;
+  gap: 20px;
+  padding: 0 16px;
+  min-height: 42px;
+  flex-shrink: 0;
   background: #fff;
   border-bottom: 1px solid #e5e7eb;
   position: sticky;
@@ -100,29 +107,30 @@ a {
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   text-decoration: none;
   color: #111;
 }
 .logo {
-  font-size: 20px;
+  font-size: 17px;
   color: #1976d2;
 }
 .name {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+.edition { font-size: 8px; letter-spacing: .06em; color: #64748b; border: 1px solid #dce3ec; border-radius: 3px; padding: 2px 4px; margin-left: 3px; }
 nav {
   display: flex;
   gap: 4px;
 }
 .tab {
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 5px 9px;
+  border-radius: 4px;
   text-decoration: none;
   color: #4b5563;
-  font-size: 14px;
+  font-size: 12px;
 }
 .tab:hover {
   background: #f2f4f7;
@@ -134,7 +142,7 @@ nav {
 .meta {
   margin-left: auto;
   color: #6b7280;
-  font-size: 12px;
+  font-size: 10px;
 }
 .meta .bad {
   color: #b91c1c;
@@ -143,5 +151,10 @@ main {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+@media (max-width: 760px) {
+  .top { flex-wrap: wrap; gap: 5px 12px; padding: 7px 10px; }
+  nav { order: 3; width: 100%; overflow-x: auto; flex-shrink: 0; white-space: nowrap; padding-bottom: 2px; }
+  .tab { flex-shrink: 0; padding: 7px 9px; }
 }
 </style>

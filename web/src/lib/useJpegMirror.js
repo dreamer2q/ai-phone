@@ -25,14 +25,7 @@
 // - 两者的 ``ready`` / ``error`` 语义对齐，调用方可以并存使用
 
 import { onBeforeUnmount, ref } from 'vue'
-
-function _b64ToBytes(b64) {
-  const bin = atob(b64)
-  const len = bin.length
-  const buf = new Uint8Array(len)
-  for (let i = 0; i < len; i++) buf[i] = bin.charCodeAt(i)
-  return buf
-}
+import { mediaBytes } from './mirrorWire.js'
 
 export function useJpegMirror(options = {}) {
   const imgEl = ref(null)
@@ -127,7 +120,7 @@ export function useJpegMirror(options = {}) {
     if (!b64) return
     let bytes
     try {
-      bytes = _b64ToBytes(b64)
+      bytes = mediaBytes(b64)
     } catch (e) {
       _setError(`base64 解码失败：${e?.message || e}`)
       return

@@ -31,7 +31,7 @@ router = APIRouter()
 async def browser_ws(ws: WebSocket, serial: str) -> None:
     hub = get_hub(ws)
     await ws.accept()
-    sub_count = await hub.subscribe(serial, ws)
+    sub_count = await hub.subscribe(serial, ws, binary_mirror=ws.query_params.get("mirror") == "binary-v1")
     logger.info("Browser 订阅 serial={} 当前订阅数={}", serial, sub_count)
 
     # 每次有新订阅者就给 Agent 发一次 start_mirror：

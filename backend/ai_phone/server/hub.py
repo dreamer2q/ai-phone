@@ -21,6 +21,8 @@ from typing import Any, Dict, Optional, Set
 from fastapi import WebSocket
 from loguru import logger
 
+from ai_phone.shared.mirror_wire import encode_mirror_message
+
 
 @dataclass
 class AgentConn:
@@ -42,6 +44,7 @@ class Hub:
         self._serial_to_agent: Dict[str, str] = {}
         self._run_to_agent: Dict[str, str] = {}
         self._subs: Dict[str, Set[WebSocket]] = {}
+        self._binary_mirror_subs: Set[WebSocket] = set()
         # serial -> agent 上报的非持久化元信息（如 unauthorized 原因）。
         # 不落库（避免加 schema migration），下次 hello 来全量刷新。
         self._device_extra: Dict[str, Dict[str, Any]] = {}
@@ -322,16 +325,19 @@ class Hub:
     # ------------------------------------------------------------------
     # 浏览器订阅
     # ------------------------------------------------------------------
-    async def subscribe(self, serial: str, ws: WebSocket) -> int:
+    async def subscribe(self, serial: str, ws: WebSocket, *, binary_mirror: bool = False) -> int:
         """订阅后返回当前订阅人数。调用方可据此判断是否需要触发 mirror 启停。"""
         subs = self._subs.setdefault(serial, set())
         subs.add(ws)
+        if binary_mirror:
+            self._binary_mirror_subs.add(ws)
         n = len(subs)
         logger.debug("浏览器订阅 serial={} 订阅数={}", serial, n)
         return n
 
     async def unsubscribe(self, serial: str, ws: WebSocket) -> int:
         """取消订阅后返回剩余订阅人数（0 表示该 serial 已没人在看）。"""
+        self._binary_mirror_subs.discard(ws)
         subs = self._subs.get(serial)
         if subs is None:
             return 0
@@ -350,9 +356,16 @@ class Hub:
         if not subs:
             return 0
 
+        # Decode once per broadcast, rather than once per subscriber. The old
+        # Agent JSON wire and older browser clients continue to work unchanged.
+        binary = encode_mirror_message(payload) if any(ws in self._binary_mirror_subs for ws in subs) else None
+
         async def _send(ws: WebSocket) -> bool:
             try:
-                await ws.send_json(payload)
+                if binary is not None and ws in self._binary_mirror_subs:
+                    await ws.send_bytes(binary)
+                else:
+                    await ws.send_json(payload)
                 return True
             except Exception:  # noqa: BLE001
                 return False

@@ -35,6 +35,11 @@ async function request(method, path, { body, headers } = {}) {
     method,
     headers: { ...(headers || {}) },
   }
+  // In the authenticated demo gateway, internal API credentials are added by
+  // the proxy. Keep the browser's HTTP authentication header available.
+  if (import.meta.env?.VITE_GATEWAY_AUTH === 'true') {
+    delete init.headers.Authorization
+  }
   if (body !== undefined) {
     if (typeof FormData !== 'undefined' && body instanceof FormData) {
       init.body = body

@@ -4,6 +4,10 @@
 
 # ai-phone
 
+> **Compact downstream fork**：此分支维护紧凑设备表格、工作台和有界视频播放优化，
+> 不代表上游官方发布。实现范围、兼容性及验收限制见
+> [Compact workbench](./docs/downstream/compact-workbench.md)。下方原项目介绍与截图保留用于说明上游能力。
+
 [![CI](https://github.com/dongxinsuperman/ai-phone/actions/workflows/ci.yml/badge.svg)](https://github.com/dongxinsuperman/ai-phone/actions/workflows/ci.yml)
 
 <p align="center">

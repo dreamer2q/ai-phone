@@ -4,6 +4,18 @@
 
 ## Unreleased
 
+### Downstream: compact console and bounded mirror playback
+
+- Replace the default device-card overview with a searchable compact table;
+  collapse node details and reduce workspace chrome while preserving controls.
+- Negotiate binary browser media envelopes, retaining legacy JSON clients and
+  unchanged Agent messages. Preserve stream IDs and exact encoded payloads.
+- Bound pending playback, recover from stale decoder queues with a fresh
+  init/keyframe, trim old media and show real playback FPS/buffer metrics.
+- Preserve previously deployed persistent Agent identity and Android foreground
+  detection fixes. See `docs/downstream/compact-workbench.md` for scope,
+  compatibility and verification limits. This is a downstream fork iteration.
+
 ### 精简终局断言提示词并增强输出解析健壮性 / Streamline final-verification prompts and harden verdict parsing
 
 - 将普通执行、独立长程救援及 V1/V2/V3 缓存终局验收的裁决原则集中在共享

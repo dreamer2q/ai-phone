@@ -22,14 +22,8 @@
 //   MediaSource 拆掉重建，否则旧 SourceBuffer 的 codec 配置不一定能 match
 
 import { onBeforeUnmount, ref, watch } from 'vue'
-
-function _b64ToBytes(b64) {
-  const bin = atob(b64)
-  const len = bin.length
-  const buf = new Uint8Array(len)
-  for (let i = 0; i < len; i++) buf[i] = bin.charCodeAt(i)
-  return buf
-}
+import { mediaBytes } from './mirrorWire.js'
+import { mirrorQueueOverflow } from './mirrorPlayback.js'
 
 export function useMseMirror(options = {}) {
   // 视频元素 ref，由模板 <video ref="videoEl"> 绑定
@@ -37,6 +31,10 @@ export function useMseMirror(options = {}) {
   // 暴露给 UI 的状态
   const ready = ref(false) // 第一段 segment 已 append 到 SourceBuffer，可视为可播
   const error = ref(null) // 任何阶段的致命错误描述
+  const queueDepth = ref(0)
+  const bufferedMs = ref(0)
+  const fps = ref(0)
+  const recoveries = ref(0)
 
   // MSE 内部状态
   let mediaSource = null
@@ -47,6 +45,7 @@ export function useMseMirror(options = {}) {
   // 队列里既可能是 ArrayBuffer（appendBuffer），也可能是函数（remove 等）
   const queue = []
   let busy = false
+  let waitingForInit = false
   // 让画面始终贴近实时：当 buffered 比 currentTime 多出 LIVE_SYNC_SEC 就跳到末尾
   const LIVE_SYNC_SEC = options.liveSyncSeconds ?? 0.4
 
@@ -80,6 +79,8 @@ export function useMseMirror(options = {}) {
     sbReady = false
     busy = false
     queue.length = 0
+    queueDepth.value = 0
+    bufferedMs.value = 0
     ready.value = false
     if (videoEl.value && videoEl.value.src) {
       try { URL.revokeObjectURL(videoEl.value.src) } catch (_) {}
@@ -92,6 +93,7 @@ export function useMseMirror(options = {}) {
     if (busy || !sourceBuffer || !sbReady) return
     if (sourceBuffer.updating) return
     const item = queue.shift()
+    queueDepth.value = queue.length
     if (!item) return
     busy = true
     try {
@@ -105,11 +107,17 @@ export function useMseMirror(options = {}) {
       _setError(`appendBuffer 失败：${e?.message || e}`)
       // QuotaExceededError：清掉前 5s 缓冲后重排
       if (e?.name === 'QuotaExceededError' && sourceBuffer.buffered.length > 0) {
+        // Keep only a short live window. Removing an arbitrary five seconds
+        // can remove the currently playing frame and make recovery stall.
         const start = sourceBuffer.buffered.start(0)
+        const trimEnd = Math.min(videoEl.value?.currentTime - 2, sourceBuffer.buffered.end(0))
+        if (!(trimEnd > start)) return _recoverBacklog()
         queue.unshift(item)
         try {
-          sourceBuffer.remove(start, start + 5)
-        } catch (_) {}
+          sourceBuffer.remove(start, trimEnd)
+        } catch (_) { _recoverBacklog() }
+      } else {
+        _recoverBacklog()
       }
     }
   }
@@ -123,6 +131,7 @@ export function useMseMirror(options = {}) {
     const buffered = sourceBuffer.buffered
     if (buffered.length === 0) return
     const end = buffered.end(buffered.length - 1)
+    bufferedMs.value = Math.max(0, Math.round((end - v.currentTime) * 1000))
     if (end - v.currentTime > LIVE_SYNC_SEC) {
       try {
         // 跳到离 live edge 50ms 以内，越靠近越实时（再小会触发缓冲不足）
@@ -130,6 +139,21 @@ export function useMseMirror(options = {}) {
       } catch (_) {}
     }
     if (!ready.value) ready.value = true
+    // Long sessions must not retain every decoded fragment indefinitely.
+    if (!busy && !sourceBuffer.updating && queue.length === 0
+      && buffered.start(0) < v.currentTime - 10) {
+      try { sourceBuffer.remove(buffered.start(0), v.currentTime - 5) } catch (_) {}
+    }
+  }
+
+  function _recoverBacklog() {
+    if (waitingForInit) return
+    waitingForInit = true
+    recoveries.value += 1
+    pendingInitBytes = null
+    pendingMime = null
+    _resetMediaSource()
+    options.onResync?.()
   }
 
   function _ensureMediaSource(mime, forceReset = false) {
@@ -184,8 +208,9 @@ export function useMseMirror(options = {}) {
   function handleInit(msg) {
     if (!videoEl.value) return
     const mime = msg.mime || 'video/mp4; codecs="avc1.42E01E"'
-    const bytes = _b64ToBytes(msg.data || '')
+    const bytes = mediaBytes(msg.data || '')
     if (bytes.length === 0) return
+    waitingForInit = false
     const w = Number(msg.width) || 0
     const h = Number(msg.height) || 0
     // 旋转后 W/H 互换；profile/level 通常不变，所以 MIME 一样但分辨率不同
@@ -196,12 +221,12 @@ export function useMseMirror(options = {}) {
     error.value = null
     // 同 MIME 且尺寸未变：当作 replay，再 append 一次 init 覆盖配置即可
     if (sourceBuffer && pendingMime === mime && sbReady && !dimsChanged) {
-      queue.push(bytes.buffer)
+      queue.push(bytes.slice().buffer)
       _processQueue()
       return
     }
     _ensureMediaSource(mime, /*forceReset*/ dimsChanged)
-    pendingInitBytes = bytes.buffer
+    pendingInitBytes = bytes.slice().buffer
     lastInitW = w
     lastInitH = h
     // 真正的 append 在 sourceopen 回调里
@@ -209,14 +234,17 @@ export function useMseMirror(options = {}) {
 
   function handleSegment(msg) {
     if (!videoEl.value) return
+    if (waitingForInit) return
     if (!sbReady && !pendingInitBytes) {
       // 还没收到任何 init，丢弃这条 media segment（不能凭空 append）
       _log('drop segment, no init yet')
       return
     }
-    const bytes = _b64ToBytes(msg.data || '')
+    const bytes = mediaBytes(msg.data || '')
     if (bytes.length === 0) return
-    queue.push(bytes.buffer)
+    queue.push(bytes.slice().buffer)
+    queueDepth.value = queue.length
+    if (mirrorQueueOverflow(queue, options)) return _recoverBacklog()
     _processQueue()
   }
 
@@ -227,6 +255,7 @@ export function useMseMirror(options = {}) {
     lastInitW = 0
     lastInitH = 0
     error.value = null
+    waitingForInit = false
   }
 
   // video 自身报错（例如解码失败）也算一次彻底失败，下次 init 来时会重建
@@ -237,7 +266,29 @@ export function useMseMirror(options = {}) {
       _setError(`<video> error code=${me?.code} message=${me?.message || ''}`)
     }
     el.addEventListener('error', onErr)
-    onCleanup(() => el.removeEventListener('error', onErr))
+    let frames = 0
+    let frameRequest = null
+    let lastSample = performance.now()
+    function rendered() {
+      frames += 1
+      frameRequest = el.requestVideoFrameCallback(rendered)
+    }
+    if (el.requestVideoFrameCallback) frameRequest = el.requestVideoFrameCallback(rendered)
+    const timer = setInterval(() => {
+      const now = performance.now()
+      fps.value = Math.round(frames * 1000 / Math.max(1, now - lastSample))
+      frames = 0
+      lastSample = now
+      if (sourceBuffer?.buffered.length) {
+        const end = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1)
+        bufferedMs.value = Math.max(0, Math.round((end - el.currentTime) * 1000))
+      }
+    }, 1000)
+    onCleanup(() => {
+      el.removeEventListener('error', onErr)
+      clearInterval(timer)
+      if (frameRequest !== null) el.cancelVideoFrameCallback?.(frameRequest)
+    })
   })
 
   onBeforeUnmount(reset)
@@ -246,6 +297,7 @@ export function useMseMirror(options = {}) {
     videoEl,
     ready,
     error,
+    queueDepth, bufferedMs, fps, recoveries,
     handleInit,
     handleSegment,
     reset,

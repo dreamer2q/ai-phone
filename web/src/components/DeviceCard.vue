@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { deviceStatus } from '../lib/deviceStatus.js'
 import {
   platformLabel as platformLabelOf,
   transportLabel as transportLabelOf,
@@ -34,28 +35,7 @@ const transportSerial = computed(() => (
 const transportLabel = computed(() => transportLabelOf(props.device.platform))
 const platformLabel = computed(() => platformLabelOf(props.device))
 
-const statusMeta = computed(() => {
-  const s = props.device.effective_status || props.device.status || 'unknown'
-  // busy / offline / unauthorized 这些"强状态"优先，readiness 只在 online + 非 busy 时覆盖。
-  // readiness 尚未上报时也不能显示为"空闲"，调度侧同样不会选择它。
-  if (s === 'online' && readiness.value?.ready !== true) {
-    return { label: '未就绪', cls: 'warn' }
-  }
-  switch (s) {
-    case 'online':
-      return { label: '空闲', cls: 'ok' }
-    case 'busy':
-      return { label: '占用中', cls: 'busy' }
-    case 'offline':
-      return { label: '离线', cls: 'off' }
-    case 'unauthorized':
-      return { label: '未授权', cls: 'warn' }
-    case 'locked':
-      return { label: '锁屏中', cls: 'warn' }
-    default:
-      return { label: s, cls: 'off' }
-  }
-})
+const statusMeta = computed(() => deviceStatus(props.device))
 
 // not_ready_reason → 中文 + 可操作的 hint。
 // 和 statusMeta 协同：readiness.ready=false 时才展示这一块。

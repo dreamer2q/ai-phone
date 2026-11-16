@@ -1,12 +1,13 @@
 """H.264 annex-B → fragmented MP4 streaming muxer，基于 ffmpeg 子进程。
 
 为什么用子进程而不是 PyAV：
-- ffmpeg ``-c:v copy -f mp4 -movflags +empty_moov+default_base_moof+...``
-  是经过工业打磨的 fmp4 muxer，输出可被浏览器 MSE 直接 ``appendBuffer``
+- 当前 ffmpeg 路径使用 libx264 ultrafast/zerolatency 重编码再封装 fMP4，
+  输出可被浏览器 MSE 直接 ``appendBuffer``。早期 copy 路径曾因缺少
+  PTS/DTS 提前退出；不要依据旧注释把当前实现误当成无重编码。
 - PyAV 没有把"产出 init segment"和"产出每个 media segment"清晰分开的 API；
   自己写 fmp4 muxer 又太多 bit-twiddling 代码（avcC/moov/moof/trun 等）
 - ffmpeg 8.x 在 Mac 上 brew 默认装；其它平台容器/脚本里也是一行 apt
-- ``-c:v copy`` 不重编码，CPU < 5% 即可处理 6Mbps 流
+- CPU 成本取决于分辨率、帧率和节点负载，须以实际进程采样为准。
 
 工作流：
   scrcpy raw bytes (annex-B H.264) ──> ffmpeg stdin

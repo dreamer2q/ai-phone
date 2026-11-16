@@ -3,6 +3,7 @@
 //      ...  sub.close()
 
 const BACKOFF = [500, 1000, 2000, 5000, 10000]
+import { decodeMirrorMessage } from './mirrorWire.js'
 
 export function openDeviceStream(serial, { onMessage, onOpen, onClose } = {}) {
   let stopped = false
@@ -20,8 +21,9 @@ export function openDeviceStream(serial, { onMessage, onOpen, onClose } = {}) {
   function connect() {
     if (stopped) return
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${proto}://${location.host}/ws/browser/${encodeURIComponent(serial)}`
+    const url = `${proto}://${location.host}/ws/browser/${encodeURIComponent(serial)}?mirror=binary-v1`
     socket = new WebSocket(url)
+    socket.binaryType = 'arraybuffer'
 
     socket.onopen = () => {
       attempt = 0
@@ -37,7 +39,7 @@ export function openDeviceStream(serial, { onMessage, onOpen, onClose } = {}) {
     socket.onmessage = (evt) => {
       let parsed
       try {
-        parsed = JSON.parse(evt.data)
+        parsed = typeof evt.data === 'string' ? JSON.parse(evt.data) : decodeMirrorMessage(evt.data)
       } catch {
         return
       }
@@ -65,6 +67,11 @@ export function openDeviceStream(serial, { onMessage, onOpen, onClose } = {}) {
   connect()
 
   return {
+    resync() {
+      // A reconnect replays the Agent's init and resumes at its next keyframe.
+      // The HTTP device lease remains held by useDeviceLock.
+      if (socket && socket.readyState === WebSocket.OPEN) socket.close(4001, 'mirror resync')
+    },
     close() {
       stopped = true
       if (pingTimer) clearInterval(pingTimer)

@@ -112,11 +112,11 @@ const shown = computed(() => props.entries.map((entry) => {
   display: flex;
   flex-direction: column;
   border: 1px solid #2a2f38;
-  border-radius: 8px;
+  border-radius: 4px;
   background: #10141b;
   color: #d7dbe3;
   font-family: ui-monospace, SF Mono, Menlo, monospace;
-  font-size: 12.5px;
+  font-size: 11px;
   overflow: hidden;
 }
 .bar {
